@@ -4,7 +4,7 @@
   "codeowners": ["@gilcu3"],
   "config_flow": true,
   "dependencies": ["recorder"],
-  "documentation": "",
+  "documentation": "https://github.com/gilcu3/leneda-integration",
   "iot_class": "cloud_polling",
   "loggers": ["leneda-client"],
   "requirements": ["leneda-client==0.6.0"],
