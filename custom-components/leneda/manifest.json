@@ -1,0 +1,12 @@
+{
+  "domain": "leneda",
+  "name": "Leneda",
+  "codeowners": ["@gilcu3"],
+  "config_flow": true,
+  "dependencies": ["recorder"],
+  "documentation": "",
+  "iot_class": "cloud_polling",
+  "loggers": ["leneda-client"],
+  "requirements": ["leneda-client==0.6.0"],
+  "version": "0.1.0"
+}
