@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 from typing import TypedDict
 
 from leneda.obis_codes import ObisCode
@@ -22,6 +22,9 @@ CONF_ENERGY_ID = "energy_id"
 CONF_METERING_POINT = "metering_point"
 
 SCAN_INTERVAL = timedelta(hours=1)
+
+# For now defaulting to 20 years, which should be good enough for everyone
+STATISTICS_PERIOD_START = datetime(2000, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
 
 class SensorTypeConfig(TypedDict):

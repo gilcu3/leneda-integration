@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import re
 from typing import Any, cast
@@ -28,7 +28,13 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, SCAN_INTERVAL, SENSOR_TYPES, UNIT_TO_AGGREGATED_UNIT
+from .const import (
+    DOMAIN,
+    SCAN_INTERVAL,
+    SENSOR_TYPES,
+    UNIT_TO_AGGREGATED_UNIT,
+    STATISTICS_PERIOD_START,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -176,7 +182,14 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """
         statistic_id = _create_statistic_id(metering_point, obis)
         start_date = await self._get_statistics_start_date(statistic_id)
-        end_date = datetime.now()
+        end_date = datetime.now().astimezone(timezone.utc)
+
+        # No need to measure anything if there will be no new data
+        if end_date - timedelta(days=1) < start_date:
+            return
+
+        # This should be really just 1 hour at most
+        start_date = start_date - timedelta(days=1)
 
         result = await self._fetch_hourly_data(
             metering_point, obis, start_date, end_date
@@ -203,10 +216,11 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         )
 
         if not last_stat:
-            return datetime.now() - timedelta(weeks=52)
+            # This should be taken from the statistics stored, but right now does not seem possible
+            return STATISTICS_PERIOD_START
 
         start_date = dt_util.utc_from_timestamp(last_stat[statistic_id][0]["end"])
-        return start_date - timedelta(days=7)
+        return start_date
 
     async def _fetch_hourly_data(
         self,
@@ -281,10 +295,11 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             Dictionary containing existing statistics
 
         """
+        # This shouldn't need to take all statistics
         return await get_instance(self.hass).async_add_executor_job(
             statistics_during_period,
             self.hass,
-            datetime.now() - timedelta(weeks=52),
+            STATISTICS_PERIOD_START,
             None,
             {statistic_id},
             "hour",
@@ -307,10 +322,11 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         """
         last_stats_time = (
-            existing_stats[statistic_id][0]["start"]
+            existing_stats[statistic_id][0]["end"]
             if existing_stats and statistic_id in existing_stats
             else None
         )
+
         last_sum = (
             float(cast(float, existing_stats[statistic_id][0]["sum"]))
             if existing_stats
@@ -318,6 +334,8 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             and existing_stats[statistic_id][0]["sum"] is not None
             else 0.0
         )
+
+        _LOGGER.debug(f"_prepare_statistics: {last_stats_time} {last_sum}")
 
         statistics = []
         for point in time_series:
@@ -329,6 +347,9 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
             value = float(point.value)
             last_sum += value
+            _LOGGER.debug(
+                f"_prepare_statistics: {point.started_at.timestamp()} {point.started_at} {last_sum} {value}"
+            )
             statistics.append(
                 StatisticData(
                     start=point.started_at,
