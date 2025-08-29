@@ -184,12 +184,11 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         start_date = await self._get_statistics_start_date(statistic_id)
         end_date = datetime.now().astimezone(timezone.utc)
 
-        # No need to measure anything if there will be no new data
+        # No need to measure anything if there will be no new data in Leneda
         if end_date - timedelta(days=1) < start_date:
             return
 
-        # This should be really just 1 hour at most
-        start_date = start_date - timedelta(days=1)
+        start_date = start_date - timedelta(hours=1)
 
         result = await self._fetch_hourly_data(
             metering_point, obis, start_date, end_date
@@ -216,7 +215,7 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         )
 
         if not last_stat:
-            # This should be taken from the statistics stored, but right now does not seem possible
+            # This should be taken from the statistics stored in Leneda, but right now does not seem possible
             return STATISTICS_PERIOD_START
 
         start_date = dt_util.utc_from_timestamp(last_stat[statistic_id][0]["end"])
@@ -279,17 +278,19 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             time_series: List of time series data points
 
         """
-        stats = await self._get_existing_statistics(statistic_id)
+        start_date = time_series[0].started_at
+        stats = await self._get_existing_statistics(statistic_id, start_date)
         statistics = await self._prepare_statistics(statistic_id, time_series, stats)
 
         if statistics:
             await self._store_statistics(statistic_id, metering_point, obis, statistics)
 
-    async def _get_existing_statistics(self, statistic_id: str) -> dict:
+    async def _get_existing_statistics(self, statistic_id: str, start_date: datetime) -> dict:
         """Get existing statistics for a given ID.
 
         Args:
             statistic_id: The statistic ID to fetch data for
+            start_date: The start date to fetch data from
 
         Returns:
             Dictionary containing existing statistics
@@ -299,7 +300,7 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         return await get_instance(self.hass).async_add_executor_job(
             statistics_during_period,
             self.hass,
-            STATISTICS_PERIOD_START,
+            start_date,
             None,
             {statistic_id},
             "hour",
@@ -322,16 +323,16 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         """
         last_stats_time = (
-            existing_stats[statistic_id][0]["end"]
+            existing_stats[statistic_id][-1]["end"]
             if existing_stats and statistic_id in existing_stats
             else None
         )
 
         last_sum = (
-            float(cast(float, existing_stats[statistic_id][0]["sum"]))
+            float(cast(float, existing_stats[statistic_id][-1]["sum"]))
             if existing_stats
             and statistic_id in existing_stats
-            and existing_stats[statistic_id][0]["sum"] is not None
+            and existing_stats[statistic_id][-1]["sum"] is not None
             else 0.0
         )
 
