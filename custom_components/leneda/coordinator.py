@@ -188,7 +188,7 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if end_date - timedelta(days=1) < start_date:
             return
 
-        start_date = start_date - timedelta(hours=1)
+        _LOGGER.debug(f"_update_statistics {start_date.timestamp()} {start_date}")
 
         result = await self._fetch_hourly_data(
             metering_point, obis, start_date, end_date
@@ -218,7 +218,7 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             # This should be taken from the statistics stored in Leneda, but right now does not seem possible
             return STATISTICS_PERIOD_START
 
-        start_date = dt_util.utc_from_timestamp(last_stat[statistic_id][0]["end"])
+        start_date = dt_util.utc_from_timestamp(last_stat[statistic_id][0]["start"])
         return start_date
 
     async def _fetch_hourly_data(
@@ -285,7 +285,9 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if statistics:
             await self._store_statistics(statistic_id, metering_point, obis, statistics)
 
-    async def _get_existing_statistics(self, statistic_id: str, start_date: datetime) -> dict:
+    async def _get_existing_statistics(
+        self, statistic_id: str, start_date: datetime
+    ) -> dict:
         """Get existing statistics for a given ID.
 
         Args:
@@ -323,7 +325,7 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         """
         last_stats_time = (
-            existing_stats[statistic_id][-1]["end"]
+            existing_stats[statistic_id][-1]["start"]
             if existing_stats and statistic_id in existing_stats
             else None
         )
@@ -344,6 +346,9 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 last_stats_time is not None
                 and point.started_at.timestamp() <= last_stats_time
             ):
+                _LOGGER.debug(
+                    f"_prepare_statistics: {point.started_at.timestamp()} {point.started_at} not taken"
+                )
                 continue
 
             value = float(point.value)
