@@ -17,6 +17,7 @@ from homeassistant.components.recorder.models import (
     StatisticMetaData,
 )
 from homeassistant.components.recorder.statistics import (
+    STATISTIC_UNIT_TO_UNIT_CONVERTER,
     async_add_external_statistics,
     get_last_statistics,
     statistics_during_period,
@@ -386,6 +387,7 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         unit_of_measurement = UNIT_TO_AGGREGATED_UNIT.get(
             obis_info.unit.lower(), obis_info.unit
         )
+        unit_converter = STATISTIC_UNIT_TO_UNIT_CONVERTER.get(unit_of_measurement)
 
         async_add_external_statistics(
             self.hass,
@@ -395,6 +397,7 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 name=f"{metering_point} {obis}",
                 source=DOMAIN,
                 statistic_id=statistic_id,
+                unit_class=unit_converter.UNIT_CLASS if unit_converter else None,
                 unit_of_measurement=unit_of_measurement,
             ),
             statistics,
