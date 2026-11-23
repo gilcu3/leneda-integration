@@ -1,6 +1,7 @@
 {
   "domain": "leneda",
   "name": "Leneda",
+  "categories": ["energy.meters_monitoring"],
   "codeowners": ["@gilcu3"],
   "config_flow": true,
   "dependencies": ["recorder"],
