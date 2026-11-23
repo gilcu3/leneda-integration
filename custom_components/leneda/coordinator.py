@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 import logging
 import re
-from typing import Any, cast
+from typing import Any
 
+import aiohttp
 from leneda import LenedaClient
-from leneda.exceptions import UnauthorizedException
+from leneda.exceptions import LenedaException, UnauthorizedException
 from leneda.obis_codes import ObisCode, get_obis_info
 
 from homeassistant.components.recorder.models import (
@@ -18,15 +20,18 @@ from homeassistant.components.recorder.models import (
 )
 from homeassistant.components.recorder.statistics import (
     STATISTIC_UNIT_TO_UNIT_CONVERTER,
+    StatisticsRow,
     async_add_external_statistics,
     get_last_statistics,
-    statistics_during_period,
 )
 from homeassistant.components.recorder.util import get_instance
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import (
+    DataUpdateCoordinator,
+    UpdateFailed,
+)
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -136,6 +141,13 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         except UnauthorizedException as err:
             _LOGGER.error("Authentication error: %s", err)
             raise ConfigEntryAuthFailed("Invalid authentication") from err
+        except (
+            LenedaException,
+            aiohttp.ClientError,
+            TimeoutError,
+            json.JSONDecodeError,
+        ) as err:
+            raise UpdateFailed(f"Error communicating with Leneda API: {err}") from err
 
         _LOGGER.debug("Completed data update for all metering points")
         return data
@@ -182,7 +194,13 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         """
         statistic_id = _create_statistic_id(metering_point, obis)
-        start_date = await self._get_statistics_start_date(statistic_id)
+        last_stat = await self._get_last_statistic(statistic_id)
+        start_date = (
+            dt_util.utc_from_timestamp(last_stat["start"])
+            if last_stat
+            # This should be taken from the statistics stored in Leneda, but right now does not seem possible
+            else STATISTICS_PERIOD_START
+        )
         end_date = datetime.now().astimezone(timezone.utc)
 
         # No need to measure anything if there will be no new data in Leneda
@@ -198,29 +216,30 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return
 
         await self._process_and_store_statistics(
-            statistic_id, metering_point, obis, result.aggregated_time_series
+            statistic_id,
+            metering_point,
+            obis,
+            result.aggregated_time_series,
+            last_stat,
         )
 
-    async def _get_statistics_start_date(self, statistic_id: str) -> datetime:
-        """Get the start date for statistics update.
+    async def _get_last_statistic(self, statistic_id: str) -> StatisticsRow | None:
+        """Get the most recent stored statistic, including its running sum.
 
         Args:
             statistic_id: The statistic ID to check
 
         Returns:
-            The start date for fetching statistics
+            The last stored statistic, or None if nothing is stored yet
 
         """
-        last_stat = await get_instance(self.hass).async_add_executor_job(
-            get_last_statistics, self.hass, 1, statistic_id, True, set()
+        # convert_units=False: the sum must stay in the unit it is stored in
+        last_stats = await get_instance(self.hass).async_add_executor_job(
+            get_last_statistics, self.hass, 1, statistic_id, False, {"sum"}
         )
-
-        if not last_stat:
-            # This should be taken from the statistics stored in Leneda, but right now does not seem possible
-            return STATISTICS_PERIOD_START
-
-        start_date = dt_util.utc_from_timestamp(last_stat[statistic_id][0]["start"])
-        return start_date
+        if not last_stats:
+            return None
+        return last_stats[statistic_id][0]
 
     async def _fetch_hourly_data(
         self,
@@ -269,6 +288,7 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         metering_point: str,
         obis: str,
         time_series: list,
+        last_stat: StatisticsRow | None,
     ) -> None:
         """Process time series data and store statistics.
 
@@ -277,65 +297,31 @@ class LenedaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             metering_point: The metering point identifier
             obis: The OBIS code
             time_series: List of time series data points
+            last_stat: The last stored statistic, or None if nothing is stored yet
 
         """
-        start_date = time_series[0].started_at
-        stats = await self._get_existing_statistics(statistic_id, start_date)
-        statistics = await self._prepare_statistics(statistic_id, time_series, stats)
+        statistics = await self._prepare_statistics(time_series, last_stat)
 
         if statistics:
             await self._store_statistics(statistic_id, metering_point, obis, statistics)
 
-    async def _get_existing_statistics(
-        self, statistic_id: str, start_date: datetime
-    ) -> dict:
-        """Get existing statistics for a given ID.
-
-        Args:
-            statistic_id: The statistic ID to fetch data for
-            start_date: The start date to fetch data from
-
-        Returns:
-            Dictionary containing existing statistics
-
-        """
-        # This shouldn't need to take all statistics
-        return await get_instance(self.hass).async_add_executor_job(
-            statistics_during_period,
-            self.hass,
-            start_date,
-            None,
-            {statistic_id},
-            "hour",
-            None,
-            {"sum"},
-        )
-
     async def _prepare_statistics(
-        self, statistic_id: str, time_series: list, existing_stats: dict
+        self, time_series: list, last_stat: StatisticsRow | None
     ) -> list[StatisticData]:
         """Prepare statistics data for storage.
 
         Args:
-            statistic_id: The statistic ID
             time_series: List of time series data points
-            existing_stats: Dictionary of existing statistics
+            last_stat: The last stored statistic, or None if nothing is stored yet
 
         Returns:
             List of prepared StatisticData objects
 
         """
-        last_stats_time = (
-            existing_stats[statistic_id][-1]["start"]
-            if existing_stats and statistic_id in existing_stats
-            else None
-        )
-
+        last_stats_time = last_stat["start"] if last_stat else None
         last_sum = (
-            float(cast(float, existing_stats[statistic_id][-1]["sum"]))
-            if existing_stats
-            and statistic_id in existing_stats
-            and existing_stats[statistic_id][-1]["sum"] is not None
+            float(last_sum_value)
+            if last_stat and (last_sum_value := last_stat.get("sum")) is not None
             else 0.0
         )
 

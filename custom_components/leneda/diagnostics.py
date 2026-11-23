@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_API_TOKEN
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.redact import async_redact_data
+from homeassistant.helpers.redact import REDACTED, async_redact_data
 
 from .const import CONF_ENERGY_ID, CONF_METERING_POINT
 
@@ -40,9 +40,11 @@ async def async_get_config_entry_diagnostics(
         "config_entry_options": async_redact_data(
             dict(config_entry.options), TO_REDACT
         ),
-        "config_entry_unique_id": config_entry.unique_id,
-        "config_subentries": async_redact_data(
-            dict(config_entry.subentries), TO_REDACT
-        ),
+        "config_entry_unique_id": REDACTED if config_entry.unique_id else None,
+        # Subentries are objects, which async_redact_data does not look into
+        "config_subentries": {
+            subentry_id: async_redact_data(subentry.as_dict(), TO_REDACT)
+            for subentry_id, subentry in config_entry.subentries.items()
+        },
         "coordinator_data": anonymized_coordinator_data,
     }

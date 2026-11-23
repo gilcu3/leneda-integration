@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Final
 
 from leneda.obis_codes import get_obis_info
 
@@ -21,10 +20,6 @@ from .const import DOMAIN, SENSOR_TYPES, UNIT_TO_AGGREGATED_UNIT
 
 _LOGGER = logging.getLogger(__name__)
 
-# Error messages
-ERROR_INVALID_SENSOR_TYPE: Final = "invalid_sensor_type"
-ERROR_SENSOR_CREATION_FAILED: Final = "sensor_creation_failed"
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -35,7 +30,6 @@ async def async_setup_entry(
     _LOGGER.debug("Setting up entry %s", entry.entry_id)
 
     coordinator = entry.runtime_data
-    sensors: list[LenedaEnergySensor] = []
 
     # Create sensors for each metering point subentry
     for subentry_id, subentry in entry.subentries.items():
@@ -44,13 +38,13 @@ async def async_setup_entry(
         _LOGGER.debug("Setting up sensors for metering point: %s", metering_point)
         _LOGGER.debug("Sensor types: %s", sensor_types)
 
+        sensors: list[LenedaEnergySensor] = []
         for sensor_type in sensor_types:
             if sensor_type not in SENSOR_TYPES:
                 _LOGGER.error(
-                    ERROR_SENSOR_CREATION_FAILED,
+                    "Unknown sensor type %s for metering point %s, skipping it",
                     sensor_type,
                     metering_point,
-                    "Invalid sensor type",
                 )
                 continue
 

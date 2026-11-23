@@ -7,7 +7,7 @@
   "documentation": "https://github.com/gilcu3/leneda-integration/wiki",
   "issue_tracker": "https://github.com/gilcu3/leneda-integration/issues",
   "iot_class": "cloud_polling",
-  "loggers": ["leneda-client"],
+  "loggers": ["leneda"],
   "requirements": ["leneda-client==0.6.0"],
   "version": "0.1.0"
 }
